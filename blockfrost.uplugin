@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "blockfrost",
+	"Description": "Connect to the Cardano Blockchain with this plugin using the Blockfrost network.",
+	"Category": "Cardano",
+	"CreatedBy": "VenomStyx",
+	"CreatedByURL": "https://www.github.com/VenomStyx",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "blockfrost",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
