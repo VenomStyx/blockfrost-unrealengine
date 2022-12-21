@@ -39,11 +39,11 @@ struct FUsageMetricsStruct
 	GENERATED_BODY()
 
 	// Server time in UNIX
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Metrics")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Network|Metrics")
 	int64 Time;
 
 	// Number of requests sent
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Metrics")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Network|Metrics")
 	int32 Calls;
 
 };
@@ -61,17 +61,15 @@ struct FEndpointUsageMetricsStruct
 	GENERATED_BODY()
 
 		// Server time in UNIX
-		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Metrics")
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Network|Metrics")
 		int64 Time;
 
 		// Number of requests sent
-		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Metrics")
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Network|Metrics")
 		int32 Calls;
 
 		// The relative endpoint
-		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Metrics")
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "blockfrost|Network|Metrics")
 		FName Endpoint;
 
 };
-
-

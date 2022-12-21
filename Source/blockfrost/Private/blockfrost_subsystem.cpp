@@ -47,41 +47,125 @@ void Ublockfrost_subsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 
 
+// GET VALID JSON OBJECT
+////////////////////////////////////////
+bool Ublockfrost_subsystem::GetValidJsonObject(FHttpResponsePtr Response, TSharedRef<TJsonReader<>>& OutReader, TSharedPtr<FJsonObject> OutJsonObject)
+{
+    // Check if response is valid
+    if (!Response.IsValid())
+    {
+        // Log error
+        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
+        return false;
+    }
+
+    // Valid Response
+    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
+    {
+        // Response Content
+        FString ResponseJson = Response->GetContentAsString();
+
+        // Read json data
+        TSharedPtr<FJsonObject> JsonObject;
+        OutReader = TJsonReaderFactory<>::Create(ResponseJson);
+
+        // Return true if deserialization is successful
+        if (FJsonSerializer::Deserialize(OutReader, JsonObject) && JsonObject.IsValid())
+        {
+            OutJsonObject = JsonObject;
+            return true;
+        }
+        // Log error
+        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Couldn't Deserialize Json Object"));
+        return false;
+    }
+    // Is Not Okay
+    UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is Not Ok"));
+    return false;
+}
+
+
+
+// GET VALID JSON ARRAY
+////////////////////////////////////////
+bool Ublockfrost_subsystem::GetValidJsonArray(FHttpResponsePtr Response, TSharedRef<TJsonReader<>>& OutReader, TArray<TSharedPtr<FJsonValue>>& OutJsonArray)
+{
+    // Check if response is valid
+    if (!Response.IsValid())
+    {
+        // Log error
+        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
+        return false;
+    }
+
+    // Valid Response
+    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
+    {
+        // Response Content
+        FString ResponseJson = Response->GetContentAsString();
+
+        // Read json data
+        TArray<TSharedPtr<FJsonValue>> JsonArray;
+        OutReader = TJsonReaderFactory<>::Create(ResponseJson);
+
+        // Return Json Array if deserialization is successful
+        if (FJsonSerializer::Deserialize(OutReader, JsonArray) && JsonArray.Num() > 0)
+        {
+            OutJsonArray = JsonArray;
+            return true;
+        }
+        // Log error
+        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Couldn't Deserialize Json Object"));
+
+        return false;
+    }
+    // Is Not Okay
+    UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is Not Ok"));
+
+    return false;
+}
+
+
+
 // MAKE BLOCKFROST REQUEST
 ////////////////////////////////////////
-TSharedRef<IHttpRequest> Ublockfrost_subsystem::MakeBlockfrostRequest(const FName& ProjectName, const FString& RequestVerb, const FString& RequestURL)
+TSharedRef<IHttpRequest> Ublockfrost_subsystem::MakeBlockfrostRequest(const FName& ProjectName, const FString& RequestVerb, const FString& Endpoint)
 {
-    // Create HttpRequest Object
-    TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
-
-    // Set URL
-    HttpRequest->SetURL(*RequestURL);
-
-    // Set as GET Request
-    HttpRequest->SetVerb(*RequestVerb);
-
     // Settings object
     Ublockfrost_settings* Settings = GetMutableDefault<Ublockfrost_settings>();
 
     // Get Project key using ProjectName & Settings::GetProjectKeyByName
     FString ProjectKey = Settings->GetProjectKeyByName(ProjectName);
 
-    // If ProjectKey isn't empty, set Auth
+    // Create HttpRequest Object
+    TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
+
+    // If ProjectKey isn't empty, set Auth Header
     if (ProjectKey != "")
     {
-        // Set Project Key as Header
+        // Set Auth Header
         HttpRequest->SetHeader("project_id", *ProjectKey);
-    }
-    // Else log error
-    else
-    {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("blockfrost: Project key not found for project name: %s"), *ProjectName.ToString());
+
+        // Get BaseURL from Settings
+        FString RootEndpoint = Settings->RootEndpoint;
+
+        // Create URL with BaseURL + Endpoint
+        FString RequestURL = RootEndpoint + Endpoint;
+
+        // Set URL
+        HttpRequest->SetURL(*RequestURL);
+
+        // Set as GET Request
+        HttpRequest->SetVerb(*RequestVerb);
+
+        // Return Request
+        return HttpRequest;
     }
 
-    // Return Request
+    // Log
+    UE_LOG(LogTemp, Error, TEXT("blockfrost: Project key not found for project name: %s"), *ProjectName.ToString());
+
     return HttpRequest;
-
 }
 
 
@@ -100,7 +184,7 @@ TSharedRef<IHttpRequest> Ublockfrost_subsystem::MakeBlockfrostRequest(const FNam
 void Ublockfrost_subsystem::RequestRootEndpoint(const FName ProjectName)
 {
     // Create HTTP Request
-    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, TEXT("GET"), TEXT("https://cardano-mainnet.blockfrost.io/api/v0/"));
+    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, "GET", "/");
 
     // Bind On Request Complete
     HttpRequest->OnProcessRequestComplete().BindUObject(this, &Ublockfrost_subsystem::ReceiveRootEndpoint);
@@ -110,59 +194,33 @@ void Ublockfrost_subsystem::RequestRootEndpoint(const FName ProjectName)
 }
 
 
-// Receive Event for Root Endpoint
+// Receive Event for Backend Status
 void Ublockfrost_subsystem::ReceiveRootEndpoint(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
-    ///// INVALID RESPONSE
-    if (!Response.IsValid())
+    // Json Reader
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FString());
+
+    // Json Object
+    TSharedRef<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+
+    // If valid response
+    if (GetValidJsonObject(Response, Reader, JsonObject))
     {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
-
-        // Call Delegate
-        OnRootEndpoint.Broadcast(false, TEXT("Invalid Response"));
-
-        // Return
-        return;
-    }
-
-    ///// VALID RESPONSE
-    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
-    {
-        // Response Content
-        FString ResponseJson = Response->GetContentAsString();
-
-        // Read json data
-        TSharedPtr<FJsonObject> JsonObject;
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseJson);
-
-        // Assign bool to Deserialize Validity
-        bool bIsValid = FJsonSerializer::Deserialize(Reader, JsonObject);
-
-        // Log Validity State if invalid
-        if (!bIsValid) { UE_LOG(LogTemp, Error, TEXT("Response is not valid")); }
-
         // Build Response String
-        FString ResponseString = bIsValid ? JsonObject->GetStringField("url") : TEXT("Invalid Response");
+        FString ResponseString = JsonObject->GetStringField("url");
 
         // Call Delegate
-        OnRootEndpoint.Broadcast(bIsValid, ResponseString);
+        OnRootEndpoint.Broadcast(true, ResponseString);
 
-    }
-
-    ///// INVALID RESPONSE
-    else
-    {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is not Ok"));
-
-        // Call Delegate
-        OnRootEndpoint.Broadcast(false, TEXT("Invalid Response"));
-
-        // Return
         return;
     }
+    // Call Delegate
+    OnRootEndpoint.Broadcast(false, TEXT("Invalid Response"));
+    
+    return;
 }
+
+
 
 
 
@@ -172,7 +230,7 @@ void Ublockfrost_subsystem::ReceiveRootEndpoint(FHttpRequestPtr Request, FHttpRe
 void Ublockfrost_subsystem::RequestBackendStatus(const FName ProjectName)
 {
     // Create HTTP request
-    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, TEXT("GET"), TEXT("https://cardano-mainnet.blockfrost.io/api/v0/health"));
+    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, "GET", "/health");
 
     // Bind On Request Complete
     HttpRequest->OnProcessRequestComplete().BindUObject(this, &Ublockfrost_subsystem::ReceiveBackendStatus);
@@ -185,65 +243,24 @@ void Ublockfrost_subsystem::RequestBackendStatus(const FName ProjectName)
 // Receive Event for Backend Status
 void Ublockfrost_subsystem::ReceiveBackendStatus(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
-    ///// INVALID RESPONSE
-    if (!Response.IsValid())
+    // Json Reader
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FString());
+
+    // Get Valid Response
+    TSharedRef<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+
+    // If Valid Response
+    if (GetValidJsonObject(Response, Reader, JsonObject))
     {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
-
         // Call Delegate
-        OnBackendStatus.Broadcast(false, false);
+        OnBackendStatus.Broadcast(true, JsonObject->GetBoolField(TEXT("is_healthy")));
 
-        // Return
         return;
     }
+    // Call Delegate
+    OnBackendStatus.Broadcast(false, false);
 
-    ///// VALID RESPONSE
-    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
-    {
-        // Response Content
-        FString ResponseJson = Response->GetContentAsString();
-
-        // Read json data
-        TSharedPtr<FJsonObject> JsonObject;
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseJson);
-
-        ///// VALID RESPONSE
-        if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid())
-        {
-            // Call Delegate
-            OnBackendStatus.Broadcast(true, JsonObject->GetBoolField(TEXT("is_healthy")));
-
-            // Return
-            return;
-        }
-
-        ///// INVALID RESPONSE
-        else
-        {
-            // Log
-            UE_LOG(LogTemp, Error, TEXT("Invalid Response - Couldn't Deserialize Json Object"));
-
-            // Call Delegate
-            OnBackendStatus.Broadcast(false, false);
-
-            // Return
-            return;
-        }
-    }
-
-    ///// INVALID RESPONSE
-    else
-    {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is not Ok"));
-
-        // Call Delegate
-        OnBackendStatus.Broadcast(false, false);
-
-        // Return
-        return;
-    }
+    return;
 }
 
 
@@ -254,8 +271,7 @@ void Ublockfrost_subsystem::ReceiveBackendStatus(FHttpRequestPtr Request, FHttpR
 void Ublockfrost_subsystem::RequestBackendTime(const FName ProjectName)
 {
     // Create HTTP request
-    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, TEXT("GET"), TEXT("https://cardano-mainnet.blockfrost.io/api/v0/health/clock"));
-
+    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, "GET", "/health/clock");
     // Bind On Request Complete
     HttpRequest->OnProcessRequestComplete().BindUObject(this, &Ublockfrost_subsystem::ReceiveBackendTime);
 
@@ -267,68 +283,27 @@ void Ublockfrost_subsystem::RequestBackendTime(const FName ProjectName)
 // Receive Event for Backend Time
 void Ublockfrost_subsystem::ReceiveBackendTime(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
-    ///// INVALID RESPONSE
-    if (!Response.IsValid())
+    // Json Reader
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FString());
+
+    // Get Valid Response
+    TSharedRef<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+
+    // If Valid Response
+    if (GetValidJsonObject(Response, Reader, JsonObject))
     {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
+        // Get Server Time
+        FString ServerTime = JsonObject->GetStringField("server_time");
 
         // Call Delegate
-        OnBackendTime.Broadcast(false, 0);
+        OnBackendTime.Broadcast(true, FCString::Atoi64(*ServerTime));
 
-        // Return
         return;
     }
+    // Call Delegate
+    OnBackendTime.Broadcast(false, 0);
 
-    ///// VALID RESPONSE
-    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
-    {
-        // Response Content
-        FString ResponseJson = Response->GetContentAsString();
-
-        // Read json data
-        TSharedPtr<FJsonObject> JsonObject;
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseJson);
-
-        ///// VALID RESPONSE
-        if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid())
-        {
-            // Get Server Time
-            FString ServerTime = JsonObject->GetStringField("server_time");
-
-            // Call Delegate
-            OnBackendTime.Broadcast(true, FCString::Atoi64(*ServerTime));
-
-            // Return
-            return;
-        }
-
-        ///// INVALID RESPONSE
-        else
-        {
-            // Log
-            UE_LOG(LogTemp, Error, TEXT("Invalid Response - Couldn't Deserialize Json Object"));
-
-            // Call Delegate
-            OnBackendTime.Broadcast(false, 0);
-
-            // Return
-            return;
-        }
-    }
-
-    ///// INVALID RESPONSE
-    else
-    {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is not Ok"));
-
-        // Call Delegate
-        OnBackendTime.Broadcast(false, 0);
-
-        // Return
-        return;
-    }
+    return;
 }
 
 
@@ -339,7 +314,7 @@ void Ublockfrost_subsystem::ReceiveBackendTime(FHttpRequestPtr Request, FHttpRes
 void Ublockfrost_subsystem::RequestUsageMetrics(const FName ProjectName)
 {
     // Create HTTP Request
-    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, TEXT("GET"), TEXT("https://cardano-mainnet.blockfrost.io/api/v0/metrics"));
+    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, "GET", "/metrics");
 
     // Bind On Request Complete
     HttpRequest->OnProcessRequestComplete().BindUObject(this, &Ublockfrost_subsystem::ReceiveUsageMetrics);
@@ -352,90 +327,48 @@ void Ublockfrost_subsystem::RequestUsageMetrics(const FName ProjectName)
 // Receive Event for Usage Metrics
 void Ublockfrost_subsystem::ReceiveUsageMetrics(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
-    // Create return output struct array
+    // Return Output - Usage Metrics Array
     TArray<FUsageMetricsStruct> UsageMetricsArray;
 
-    ///// INVALID RESPONSE
-    if (!Response.IsValid())
+    // Json Array & Reader
+    TArray<TSharedPtr<FJsonValue>> JsonArray;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FString());
+
+    // If Valid Response
+    if (GetValidJsonArray(Response, Reader, JsonArray))
     {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
+        // Loop Entry Variables - JsonObject, Endpoint Metrics
+        TSharedPtr<FJsonObject> JsonObject;
+        FUsageMetricsStruct UsageMetrics;
 
-        // Call Delegate
-        OnUsageMetrics.Broadcast(false, UsageMetricsArray);
-
-        // Return
-        return;
-    }
-
-    ///// VALID RESPONSE
-    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
-    {
-        // Get Response Content as String
-        FString ResponseJson = Response->GetContentAsString();
-
-        // Convert to JsonArray object & create JsonReader to read
-        TArray<TSharedPtr<FJsonValue>> JsonArray;
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseJson);
-
-        ///// VALID JSON
-        if (FJsonSerializer::Deserialize(Reader, JsonArray) && JsonArray.Num() > 0)
+        ///// LOOP JSONARRAY
+        for (TSharedPtr<FJsonValue> JsonValue : JsonArray)
         {
-            ///// LOOP JSONARRAY
-            for (TSharedPtr<FJsonValue> JsonValue : JsonArray)
+            if (JsonValue.IsValid())
             {
                 // Create JsonObject for current index
-                TSharedPtr<FJsonObject> JsonObject = JsonValue->AsObject();
-
-                // Create struct for output entry
-                FUsageMetricsStruct UsageMetrics;
-
-                // Get Response Info
-                FString ServerTime = JsonObject->GetStringField("time");
-                int32 Calls = JsonObject->GetIntegerField("calls");
+                JsonObject = JsonValue->AsObject();
 
                 // Populate Struct
-                UsageMetrics.Time = FCString::Atoi64(*ServerTime);
+                UsageMetrics.Time = FCString::Atoi64(*JsonObject->GetStringField("time"));
                 UsageMetrics.Calls = JsonObject->GetIntegerField("calls");
 
                 // Add new entry to return array
                 UsageMetricsArray.Add(UsageMetrics);
-
             }
-            // Call Delegate when finished looping
-            OnUsageMetrics.Broadcast(true, UsageMetricsArray);
-
-            // Complete
-            return;
         }
+        // Call Delegate when finished looping
+        OnUsageMetrics.Broadcast(true, UsageMetricsArray);
 
-        ///// INVALID RESPONSE
-        else
-        {
-            // Log
-            UE_LOG(LogTemp, Error, TEXT("Invalid Response - Couldn't Deserialize Json Object"));
-
-            // Call Delegate
-            OnUsageMetrics.Broadcast(false, UsageMetricsArray);
-
-            // Complete
-            return;
-        }
-    }
-
-    ///// INVALID RESPONSE
-    else
-    {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is not Ok"));
-
-        // Call Delegate
-        OnUsageMetrics.Broadcast(false, UsageMetricsArray);
-
-        // Complete
         return;
     }
+    // Call Delegate when finished looping
+    OnUsageMetrics.Broadcast(false, UsageMetricsArray);
+
+    return;
 }
+
+
 
 
 
@@ -445,7 +378,7 @@ void Ublockfrost_subsystem::ReceiveUsageMetrics(FHttpRequestPtr Request, FHttpRe
 void Ublockfrost_subsystem::RequestEndpointUsageMetrics(const FName ProjectName)
 {
     // Create HTTP request
-    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, TEXT("GET"), TEXT("https://cardano-mainnet.blockfrost.io/api/v0/metrics/endpoints"));
+    TSharedRef<IHttpRequest> HttpRequest = MakeBlockfrostRequest(ProjectName, "GET", "/metrics/endpoints");
 
     // Bind On Request Complete
     HttpRequest->OnProcessRequestComplete().BindUObject(this, &Ublockfrost_subsystem::ReceiveEndpointUsageMetrics);
@@ -458,92 +391,48 @@ void Ublockfrost_subsystem::RequestEndpointUsageMetrics(const FName ProjectName)
 // Receive Event for Endpoint Usage Metrics
 void Ublockfrost_subsystem::ReceiveEndpointUsageMetrics(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
-
-    // Create return output struct array
+    // Output - Endpoint Usage Metrics Array
     TArray<FEndpointUsageMetricsStruct> EndpointUsageMetricsArray;
 
-    ///// INVALID RESPONSE
-    if (!Response.IsValid())
+    // Json Array & Reader
+    TArray<TSharedPtr<FJsonValue>> JsonArray;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FString());
+
+    // If Valid Response
+    if (GetValidJsonArray(Response, Reader, JsonArray))
     {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Response is not valid"));
+        // Loop Entry Variables - JsonObject, Endpoint Usage Metrics
+        FEndpointUsageMetricsStruct EndpointUsageMetrics;
+        TSharedPtr<FJsonObject> JsonObject;
 
-        // Call Delegate
-        OnEndpointUsageMetrics.Broadcast(false, EndpointUsageMetricsArray);
-
-        // Return
-        return;
-    }
-
-    ///// VALID RESPONSE
-    if (EHttpResponseCodes::IsOk(Response->GetResponseCode()))
-    {
-        // Get Response Content as String
-        FString ResponseJson = Response->GetContentAsString();
-
-        // Read response as JsonArray
-        TArray<TSharedPtr<FJsonValue>> JsonArray;
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseJson);
-
-        ///// VALID JSON
-        if (FJsonSerializer::Deserialize(Reader, JsonArray) && JsonArray.Num() > 0)
+        ///// LOOP JSONARRAY
+        for (TSharedPtr<FJsonValue> JsonValue : JsonArray)
         {
-            ///// LOOP JSONARRAY
-            for (TSharedPtr<FJsonValue> JsonValue : JsonArray)
+            if (JsonValue.IsValid())
             {
-                // Create JsonObject for current index
-                TSharedPtr<FJsonObject> JsonObject = JsonValue->AsObject();
-
-                // Create struct for output entry
-                FEndpointUsageMetricsStruct EndpointUsageMetrics;
-
-                // Get Response Info
-                FString ServerTime = JsonObject->GetStringField("time");
-                int32 Calls = JsonObject->GetIntegerField("calls");
+                // Set JsonObject to Value for current index
+                JsonObject = JsonValue->AsObject();
 
                 // Populate Struct
-                EndpointUsageMetrics.Time = FCString::Atoi64(*ServerTime);
+                EndpointUsageMetrics.Time = FCString::Atoi64(*JsonObject->GetStringField("time"));
                 EndpointUsageMetrics.Calls = JsonObject->GetIntegerField("calls");
                 EndpointUsageMetrics.Endpoint = FName(JsonObject->GetStringField("endpoint"));
 
                 // Add new entry to return array
                 EndpointUsageMetricsArray.Add(EndpointUsageMetrics);
-
             }
-            // Call Delegate when finished looping
-            OnEndpointUsageMetrics.Broadcast(true, EndpointUsageMetricsArray);
-
-            // Complete
-            return;
         }
+        // Call Delegate when finished looping
+        OnEndpointUsageMetrics.Broadcast(true, EndpointUsageMetricsArray);
 
-        ///// INVALID RESPONSE
-        else
-        {
-            // Log
-            UE_LOG(LogTemp, Error, TEXT("Invalid Response - Couldn't Deserialize Json Object"));
-
-            // Call Delegate
-            OnEndpointUsageMetrics.Broadcast(false, EndpointUsageMetricsArray);
-
-            // Complete
-            return;
-        }
-    }
-
-    ///// INVALID RESPONSE
-    else
-    {
-        // Log
-        UE_LOG(LogTemp, Error, TEXT("Invalid Response - Is not Ok"));
-
-        // Call Delegate
-        OnEndpointUsageMetrics.Broadcast(false, EndpointUsageMetricsArray);
-
-        // Complete
         return;
     }
+    // Call Delegate
+    OnEndpointUsageMetrics.Broadcast(false, EndpointUsageMetricsArray);
+    
+    return;
 }
+
 
 
 

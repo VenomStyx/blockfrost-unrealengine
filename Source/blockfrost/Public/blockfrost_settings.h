@@ -53,6 +53,10 @@ private:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "blockfrost|Auth")
 	TMap<FName, FString> ProjectKeys;
 
+	// Endpoint URL
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category = "blockfrost|Auth")
+		FString RootEndpoint;
+
 	// Gets the Project Key using a Project Name. Set via .ini settings or in Project Settings under "Game" if using in editor. 
 	FString GetProjectKeyByName(FName ProjectName);
 
