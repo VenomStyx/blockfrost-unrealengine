@@ -194,7 +194,7 @@ void Ublockfrost_subsystem::RequestRootEndpoint(const FName ProjectName)
 }
 
 
-// Receive Event for Backend Status
+// Receive Event for Root Endpoint
 void Ublockfrost_subsystem::ReceiveRootEndpoint(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
     // Json Reader
